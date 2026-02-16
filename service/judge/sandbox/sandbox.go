@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 
+	"github.com/ricejson/gotool/logx"
 	"github.com/ricejson/oj-backend/domain"
 )
 
@@ -30,14 +31,15 @@ type CodeSandbox interface {
 
 // NewInstance 工厂方法获取代码沙箱实例
 func NewInstance(typ string) CodeSandbox {
+	// 默认用样例代码沙箱
+	var sandbox CodeSandbox = NewExampleCodeSandbox()
 	switch typ {
 	case CodeSandBoxTypeExample:
-		return NewExampleCodeSandbox()
+		sandbox = NewExampleCodeSandbox()
 	case CodeSandBoxTypeRemote:
-		return NewRemoteCodeSandbox()
+		sandbox = NewRemoteCodeSandbox()
 	case CodeSandBoxTypeThreeParty:
-		return NewThreePartyCodeSandbox()
+		sandbox = NewThreePartyCodeSandbox()
 	}
-	// 默认用样例代码沙箱
-	return NewExampleCodeSandbox()
+	return NewCodeSandboxProxy(sandbox, logx.NewZapLogger())
 }
