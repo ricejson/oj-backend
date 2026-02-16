@@ -1,16 +1,33 @@
 package main
 
 import (
-	"github.com/ricejson/oj-backend/repository/dao/submit"
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
+	"context"
+	"fmt"
+
+	"github.com/ricejson/oj-backend/service/judge/sandbox"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
-func main() {
-	dsn := "root:root@tcp(127.0.0.1:13316)/rice_oj?charset=utf8mb4&parseTime=True&loc=Local"
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+func InitViper() {
+	// 读取命令行参数
+	s := pflag.String("config", "", "config file path")
+	pflag.Parse()
+	// 设置文件路径
+	viper.SetConfigFile(*s)
+	// 读取配置信息
+	err := viper.ReadInConfig()
 	if err != nil {
 		panic(err)
 	}
-	db.AutoMigrate(&submit.QuestionSubmit{})
+}
+
+func main() {
+	InitViper()
+	instance := sandbox.NewInstance(viper.GetString("sandbox.type"))
+	response, err := instance.ExecuteCode(context.Background(), &sandbox.ExecuteCodeRequest{
+		Code:         "main",
+		InputSamples: []string{"1 2", "3, 4"},
+	})
+	fmt.Println(response, err)
 }
