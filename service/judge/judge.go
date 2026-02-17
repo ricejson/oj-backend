@@ -10,6 +10,7 @@ import (
 	"github.com/ricejson/oj-backend/repository/dao/question"
 	"github.com/ricejson/oj-backend/repository/dao/submit"
 	"github.com/ricejson/oj-backend/service/judge/sandbox"
+	"github.com/ricejson/oj-backend/service/judge/stragety"
 )
 
 // JudgeService 判题服务
@@ -51,32 +52,42 @@ func (s *JudgeService) DoJudge(ctx context.Context, submitId int64) (*domain.Jud
 	if err != nil {
 		return nil, err
 	}
-	// 4. 交给判题机
-	var cases domain.Cases
+	// 4. 交给判题机处理
+	var cases *domain.Cases
 	casesStr := question.Cases
 	err = json.Unmarshal([]byte(casesStr), &cases)
 	if err != nil {
 		return nil, err
 	}
-	go func() {
-		updateQuestionSubmit = submit.QuestionSubmit{
-			Id: questionSubmit.Id,
-		}
-		resp, executeErr := s.sandbox.ExecuteCode(ctx, &sandbox.ExecuteCodeRequest{
-			Code:         questionSubmit.Code,
-			Language:     questionSubmit.Language,
-			InputSamples: cases.InputCases,
-		})
-		if executeErr != nil {
-			updateQuestionSubmit.Status = uint8(consts.QuestionSubmitStatusFailed)
-		} else {
-			updateQuestionSubmit.Status = uint8(consts.QuestionSubmitStatusSuccess)
-			bytes, _ := json.Marshal(resp.JudgeInfo)
-			updateQuestionSubmit.JudgeInfo = string(bytes)
-		}
-		_, _ = s.questionSubmitDAO.UpdateById(ctx, updateQuestionSubmit)
-	}()
+	resp, executeErr := s.sandbox.ExecuteCode(ctx, &sandbox.ExecuteCodeRequest{
+		Code:         questionSubmit.Code,
+		Language:     questionSubmit.Language,
+		InputSamples: cases.InputCases,
+	})
+	// 5. 完成判题信息更新
+	var limitConfig *domain.QuestionLimitConfig
+	limitConfigStr := question.LimitConfig
+	err = json.Unmarshal([]byte(limitConfigStr), &limitConfig)
+	if err != nil {
+		return nil, err
+	}
+	updateQuestionSubmit = submit.QuestionSubmit{
+		Id: questionSubmit.Id,
+	}
+	if executeErr != nil {
+		updateQuestionSubmit.Status = uint8(consts.QuestionSubmitStatusFailed)
+	} else {
+		updateQuestionSubmit.Status = uint8(consts.QuestionSubmitStatusSuccess)
+		judgeInfo := resp.JudgeInfo
+		judgeInfo.Message = judgeMessage(cases, resp.OutputResults, judgeInfo, limitConfig, questionSubmit.Language)
+		bytes, _ := json.Marshal(resp.JudgeInfo)
+		updateQuestionSubmit.JudgeInfo = string(bytes)
+	}
+	_, _ = s.questionSubmitDAO.UpdateById(ctx, updateQuestionSubmit)
 	questionSubmit, err = s.questionSubmitDAO.FindById(ctx, submitId)
+	if err != nil {
+		return nil, err
+	}
 	var judgeInfo *domain.JudgeInfo
 	judgeInfoStr := questionSubmit.JudgeInfo
 	err = json.Unmarshal([]byte(judgeInfoStr), &judgeInfo)
@@ -84,4 +95,15 @@ func (s *JudgeService) DoJudge(ctx context.Context, submitId int64) (*domain.Jud
 		return nil, err
 	}
 	return judgeInfo, nil
+}
+
+// judgeMessage 策略模式获取message执行信息
+func judgeMessage(cases *domain.Cases, output []string, judgeInfo *domain.JudgeInfo, limitConfig *domain.QuestionLimitConfig, language string) string {
+	ctx := stragety.NewStrategyContext(cases, output, judgeInfo, limitConfig)
+	var s stragety.JudgeStrategy = stragety.NewDefaultStrategy(ctx)
+	switch language {
+	case consts.JavaLanguage:
+		s = stragety.NewJavaLanguageStrategy(ctx)
+	}
+	return s.JudgeMessage()
 }
